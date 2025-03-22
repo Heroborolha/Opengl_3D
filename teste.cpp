@@ -15,27 +15,85 @@ float sensibilidade = 0.1f;
 // Velocidade do movimento
 float velocidade = 0.1f;
 
+float playerX, playerY, playerZ; // Posição do jogador (centro do corpo)
+float pernaEsqX, pernaEsqY, pernaEsqZ;
+float pernaDirX, pernaDirY, pernaDirZ;
+float passo = 0.0f; // Controle do efeito de caminhada
+
 // Variáveis globais para posição da bola
 float pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -6.0f;
+float ballRotationAngle = 0.0f;
 float ballRadius = 0.2f;
 float groundY = -1.0f;  // Altura do chão
+
+bool isMoving = false;
+bool ballHit = false;  // Indica se a bola foi atingida
+float hitTimer = 0.0f; // Tempo restante do empurrão
+float pushSpeed = 0.05f; // Velocidade do empurrão
+float pushDirX = 0.0f, pushDirZ = 0.0f; // Direção do empurrão
 
 // Dimensões da janela
 int larguraJanela = 800, alturaJanela = 600;
 
-bool checkCollisionWithGround() {
+bool checkCollisionWithGround(){
     return (pos_ballY - ballRadius <= groundY);
 }
 
-void BallPos() {
+bool checkCollisionWithPlayer(){
+    float dx = pernaEsqX - pos_ballX;
+    float dy = pernaEsqY - pos_ballY;
+    float dz = pernaEsqZ - pos_ballZ;
+    float distance = sqrt(dx*dx + dy*dy + dz*dz);
+
+    return (distance < ballRadius + 0.5); // Se a distância for menor que o raio da bola, há colisão
+}
+
+void BallPos(){
     pos_ballY -= 0.01f; // Simula gravidade (queda)
 
     if (checkCollisionWithGround()) {
-        pos_ballY = groundY + ballRadius; // Impede que a bola atravesse o chão
+        pos_ballY = groundY + ballRadius;
+    }
+
+    // Se a bola foi atingida, mova por um tempo
+    if (ballHit) {
+        pos_ballX += pushDirX * pushSpeed;
+        pos_ballZ += pushDirZ * pushSpeed;
+
+        hitTimer -= 0.05f; // Diminui o tempo do empurrão
+        if (hitTimer <= 0.0f) {
+            ballHit = false; // Para o movimento após o tempo acabar
+        }
     }
 }
 
-void load_texture(GLuint* texture, const char* image_location) { 
+void BallRot(){
+    if (checkCollisionWithPlayer()) { 
+        ballRotationAngle += 5.0f;  // Ajuste a velocidade da rotação
+        
+        if (ballRotationAngle >= 360.0f) {
+            ballRotationAngle -= 360.0f;
+        }
+
+        // Calcula a direção do empurrão (inverso da posição relativa do player)
+        float dx = pos_ballX - pernaEsqX;
+        float dz = pos_ballZ - pernaEsqZ;
+        float length = sqrt(dx*dx + dz*dz);
+
+        if (length > 0.0f) {
+            pushDirX = dx / length;
+            pushDirZ = dz / length;
+        } else {
+            pushDirX = 0.0f;
+            pushDirZ = 0.0f;
+        }
+
+        ballHit = true;
+        hitTimer = 1.0f; // A bola se moverá por um curto período
+    }
+}
+
+void load_texture(GLuint* texture, const char* image_location){ 
     if (!*texture) {
         *texture = SOIL_load_OGL_texture(image_location, SOIL_LOAD_AUTO, SOIL_CREATE_NEW_ID, SOIL_FLAG_INVERT_Y);
         if (!*texture) {
@@ -48,7 +106,7 @@ void load_texture(GLuint* texture, const char* image_location) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 
-void init() {
+void init(){
     GLfloat lightenv[] = {0.2, 0.2, 0.2, 1.0};
     GLfloat lightColor[] = {1.0f, 1.0f, 1.0f, 1.0f};
     GLfloat lightPos[] = {2.0f, 12.0f, 0.0f, 1.0f};  // 2.0f, 0.0f, -5.0f
@@ -70,7 +128,45 @@ void init() {
     glutSetCursor(GLUT_CURSOR_NONE);
 }
 
-void Sky(float tamanho) {
+void Player() {
+    glPushMatrix();
+        glColor3f(0.3f, 0.2f, 0.1f); // Cor marrom para as pernas
+
+        // Perna esquerda
+        glPushMatrix();
+            glTranslatef(pernaEsqX, pernaEsqY, pernaEsqZ);
+            glScalef(0.2f, 1.0f, 0.2f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Perna direita
+        glPushMatrix();
+            glTranslatef(pernaDirX, pernaDirY, pernaDirZ);
+            glScalef(0.2f, 1.0f, 0.2f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+    glPopMatrix();
+}
+
+void PlayerPos() {
+    playerX = camX;
+    playerY = camY - 1.0f; // Ajusta a altura para o centro do corpo
+    playerZ = camZ;
+
+    // Define a posição das pernas em relação ao jogador
+    float deslocamento = sin(passo) * 0.1f; // Alternância das pernas para caminhar
+
+    pernaEsqX = playerX - 0.2f;
+    pernaEsqY = playerY - 0.5f;
+    pernaEsqZ = playerZ + deslocamento; // Efeito de caminhada
+
+    pernaDirX = playerX + 0.2f;
+    pernaDirY = playerY - 0.5f;
+    pernaDirZ = playerZ - deslocamento; // Alternando para trás
+}
+
+void Sky(float tamanho){
     glDisable(GL_LIGHTING);
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, skyboxTexture);
@@ -121,7 +217,7 @@ void Sky(float tamanho) {
     glEnable(GL_LIGHTING);
 }
 
-void Chao() {
+void Chao(){
 
     glEnable(GL_TEXTURE_2D);  // Ativar texturas
     glBindTexture(GL_TEXTURE_2D, groundTexture);  // Vincular a textura
@@ -144,7 +240,7 @@ void Chao() {
     glEnd();
 }
 
-void Grid() {
+void Grid(){
     glColor3f(0.3f, 0.3f, 0.3f); 
     glBegin(GL_LINES);
     for (float i = -10; i <= 10; i += 1.0) {
@@ -156,16 +252,7 @@ void Grid() {
     glEnd();
 }
 
-// Novo objeto distante: um cubo vermelho
-void desenhaObjetoDistante() {
-    glPushMatrix();
-        glColor3f(1.0, 0.0, 0.0);
-        glTranslatef(2.0f, 0.0f, -5.0f);  // Posição mais distante da esfera
-        glutSolidCube(1.5);
-    glPopMatrix();
-}
-
-void Trave() {
+void Trave(){
     GLUquadric* quadric = gluNewQuadric();
     glColor3f(1.0, 1.0, 1.0);  // Cor branca da trave
 
@@ -197,7 +284,7 @@ void Trave() {
     gluDeleteQuadric(quadric);
 }
 
-void Rede() {
+void Rede(){
     glColor3f(1.0f, 1.0f, 1.0f);  // Cor branca da rede
 
     float altura = 2.5f;
@@ -254,9 +341,7 @@ void Rede() {
     glEnd();
 }
 
-
-
-void Ball() {
+void Ball(){
     GLUquadric* quadric = gluNewQuadric();  
 
     glPushMatrix();
@@ -266,6 +351,7 @@ void Ball() {
         gluQuadricTexture(quadric, GL_TRUE);  
         glColor3f(1.0, 1.0, 1.0);  
         glTranslatef(pos_ballX, pos_ballY, pos_ballZ);
+        glRotatef(ballRotationAngle, 0, 1, 0);
         gluSphere(quadric, ballRadius, 30, 30);  
 
         glDisable(GL_TEXTURE_2D);  
@@ -307,18 +393,22 @@ void keyboard(unsigned char key, int x, int y) {
         case 'w':
             camX += moveX;
             camZ += moveZ;
+            isMoving = true;
             break;
         case 's':
             camX -= moveX;
             camZ -= moveZ;
+            isMoving = true;
             break;
         case 'a':
             camX += moveZ;
             camZ -= moveX;
+            isMoving = true;
             break;
         case 'd':
             camX -= moveZ;
             camZ += moveX;
+            isMoving = true;
             break;
         case 27:
             exit(0);
@@ -341,6 +431,13 @@ void display() {
     Grid();
     Sky(50.0f);
     Ball();
+    BallRot();
+    BallPos();
+    Player();
+    if (isMoving) {
+        passo += 0.2f; // Atualiza o efeito de caminhada
+    }
+    PlayerPos();
 
     glPushMatrix();
         glDisable(GL_LIGHTING);  // Desativa a iluminação para a esfera da luz
@@ -349,9 +446,7 @@ void display() {
         glutSolidSphere(0.5, 20, 20);  // Esfera pequena representando a luz
         glEnable(GL_LIGHTING);  // Reativa a iluminação
     glPopMatrix();
-
-    // **Novo objeto: cubo vermelho distante**
-    desenhaObjetoDistante();
+    
     Trave();
     Rede();
 
@@ -372,6 +467,7 @@ void reshape(int w, int h) {
 }
 
 void update(int value) {
+    BallRot();
     BallPos();
     glutPostRedisplay();
     glutTimerFunc(16, update, 0); // Atualiza a cada ~16ms (aproximadamente 60 FPS)
