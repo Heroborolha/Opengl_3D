@@ -3,7 +3,7 @@
 #include <cmath>
 #include <stdio.h>
 
-GLuint skyboxTexture = 0, groundTexture = 0, ballTexture = 0;
+GLuint skyboxTexture = 0, groundTexture = 0, ballTexture = 0, logoTexture = 0;
 // Posição da câmera
 float camX = 0.0f, camY = 1.0f, camZ = 5.0f;
 // Direção que a câmera está olhando
@@ -18,10 +18,12 @@ float velocidade = 0.1f;
 float playerX, playerY, playerZ; // Posição do jogador (centro do corpo)
 float pernaEsqX, pernaEsqY, pernaEsqZ;
 float pernaDirX, pernaDirY, pernaDirZ;
+float kick = 0.98f;
 float passo = 0.0f; // Controle do efeito de caminhada
 
 // Variáveis globais para posição da bola
 float pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -6.0f;
+float ballRotX = 0.0f, ballRotZ = 0.0f;
 float ballRotationAngle = 0.0f;
 float ballRadius = 0.2f;
 float groundY = -1.0f;  // Altura do chão
@@ -29,8 +31,9 @@ float groundY = -1.0f;  // Altura do chão
 bool isMoving = false;
 bool ballHit = false;  // Indica se a bola foi atingida
 float hitTimer = 0.0f; // Tempo restante do empurrão
-float pushSpeed = 0.05f; // Velocidade do empurrão
-float pushDirX = 0.0f, pushDirZ = 0.0f; // Direção do empurrão
+float ballSpeed = 0.0f; // Velocidade do empurrão
+float friction = 0.98f, force = 0.0f;
+float pushDirX = 0.0f, pushDirY = 0.0f, pushDirZ = 0.0f; // Direção do empurrão
 
 // Dimensões da janela
 int larguraJanela = 800, alturaJanela = 600;
@@ -49,32 +52,66 @@ bool checkCollisionWithPlayer(){
 }
 
 void BallPos(){
-    pos_ballY -= 0.01f; // Simula gravidade (queda)
+    pos_ballY -= 0.01f * friction; // Simula gravidade (queda)
 
+    // Se a bola atinge o chão
     if (checkCollisionWithGround()) {
         pos_ballY = groundY + ballRadius;
+        
+        if (force < 0) { // Se estiver descendo, reduz a força para simular quique
+            force *= -0.5f; // Faz a bola quicar um pouco
+        }
+
+        if (fabs(force) < 0.01f) { // Se a força for muito pequena, para completamente
+            force = 0.0f;
+        }
     }
 
     // Se a bola foi atingida, mova por um tempo
     if (ballHit) {
-        pos_ballX += pushDirX * pushSpeed;
-        pos_ballZ += pushDirZ * pushSpeed;
+        // Calcula a distância percorrida neste frame
+        float prevX = pos_ballX;
+        float prevZ = pos_ballZ;
 
-        hitTimer -= 0.05f; // Diminui o tempo do empurrão
-        if (hitTimer <= 0.0f) {
-            ballHit = false; // Para o movimento após o tempo acabar
+        pos_ballX += pushDirX * ballSpeed;
+        pos_ballZ += pushDirZ * ballSpeed;
+        pos_ballY += force;
+         
+        // Reduz a velocidade gradualmente (simulando atrito)
+        ballSpeed *= friction; 
+        force *= 0.90f;
+
+        // Para a bola completamente se a velocidade for muito pequena
+        if (ballSpeed < 0.001f) {
+            ballSpeed = 0.0f;
+            force = 0.0f;
+            ballHit = false;
         }
-    }
-}
 
-void BallRot(){
-    if (checkCollisionWithPlayer()) { 
-        ballRotationAngle += 5.0f;  // Ajuste a velocidade da rotação
-        
+        float dx = pos_ballX - prevX;
+        float dz = pos_ballZ - prevZ;
+
+        float distance = sqrt(dx*dx + dz*dz);
+
+        // Converte a distância percorrida em rotação
+        float rotationSpeed = (distance / ballRadius) * (180.0f / M_PI);
+        ballRotationAngle += rotationSpeed;
+
         if (ballRotationAngle >= 360.0f) {
             ballRotationAngle -= 360.0f;
         }
 
+        // Define o eixo de rotação baseado na direção do movimento
+        ballRotX = pushDirZ;  // O eixo de rotação deve ser perpendicular ao movimento
+        ballRotZ = -pushDirX; // Mantém a rotação correta ao longo do deslocamento
+
+    }
+}
+
+void BallRot(){
+
+    float maxspeed = 0.04f;
+    if (checkCollisionWithPlayer()) { 
         // Calcula a direção do empurrão (inverso da posição relativa do player)
         float dx = pos_ballX - pernaEsqX;
         float dz = pos_ballZ - pernaEsqZ;
@@ -88,8 +125,8 @@ void BallRot(){
             pushDirZ = 0.0f;
         }
 
+        ballSpeed = maxspeed;
         ballHit = true;
-        hitTimer = 1.0f; // A bola se moverá por um curto período
     }
 }
 
@@ -219,25 +256,54 @@ void Sky(float tamanho){
 
 void Chao(){
 
-    glEnable(GL_TEXTURE_2D);  // Ativar texturas
-    glBindTexture(GL_TEXTURE_2D, groundTexture);  // Vincular a textura
+    glEnable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);  
+    glBindTexture(GL_TEXTURE_2D, groundTexture);  
 
-    glColor3f(1.0f, 1.0f, 1.0f);  // Branco para não alterar a textura
+    glColor3f(1.0f, 1.0f, 1.0f);  
     glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 0.0f); glVertex3f(-10.0f, -1.0f, -10.0f);
-        glTexCoord2f(1.0f, 0.0f); glVertex3f(10.0f, -1.0f, -10.0f);
-        glTexCoord2f(1.0f, 1.0f); glVertex3f(10.0f, -1.0f, 10.0f);
-        glTexCoord2f(0.0f, 1.0f); glVertex3f(-10.0f, -1.0f, 10.0f);
+
+    float gridSize = 10.0f;  // Define o tamanho total do grid
+    float cellSize = 1.0f;   // Tamanho de cada quadrado individual do grid
+
+    for (float i = -gridSize; i < gridSize; i += cellSize) {
+        for (float j = -gridSize; j < gridSize; j += cellSize) {
+            glTexCoord2f(0.0f, 0.0f); glVertex3f(i, -1.0f, j);
+            glTexCoord2f(1.0f, 0.0f); glVertex3f(i + cellSize, -1.0f, j);
+            glTexCoord2f(1.0f, 1.0f); glVertex3f(i + cellSize, -1.0f, j + cellSize);
+            glTexCoord2f(0.0f, 1.0f); glVertex3f(i, -1.0f, j + cellSize);
+        }
+    }
+
     glEnd();
+    glDisable(GL_TEXTURE_2D); 
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, logoTexture);
+
+    float width = 10.0f, height = 0.3f;  // Altura aumentada para visualizar melhor a textura
+    gridSize = 1.0f;  // Tamanho da subdivisão do grid das paredes
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    for (float i = -width; i < width; i += gridSize) {
+
+        // Parede traseira
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(i, -1.0f, -width);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f(i + gridSize, -1.0f, -width);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f(i + gridSize, height, -width);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f(i, height, -width);
+
+        // Parede frontal
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(i, -1.0f, width);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f(i + gridSize, -1.0f, width);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f(i + gridSize, height, width);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f(i, height, width);
+    }
+    glEnd();
+
+    glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
-
-    glColor3f(0.5f, 0.5f, 0.5f);
-    glBegin(GL_QUADS);
-        glVertex3f(-10.0f, -1.0f, -10.0f); 
-        glVertex3f(10.0f, -1.0f, -10.0f);   
-        glVertex3f(10.0f, 5.0f, -10.0f);    
-        glVertex3f(-10.0f, 5.0f, -10.0f);   
-    glEnd();
 }
 
 void Grid(){
@@ -351,7 +417,7 @@ void Ball(){
         gluQuadricTexture(quadric, GL_TRUE);  
         glColor3f(1.0, 1.0, 1.0);  
         glTranslatef(pos_ballX, pos_ballY, pos_ballZ);
-        glRotatef(ballRotationAngle, 0, 1, 0);
+        glRotatef(ballRotationAngle, ballRotX, 0.0f, ballRotZ);
         gluSphere(quadric, ballRadius, 30, 30);  
 
         glDisable(GL_TEXTURE_2D);  
@@ -386,6 +452,26 @@ void mouseMotion(int x, int y) {
     glutPostRedisplay();
 }
 
+void mouseClick(int button, int state, int x, int y){
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        if (checkCollisionWithPlayer()) {
+            // Calcula a direção do chute baseada na câmera (para onde o jogador está olhando)
+            float radYaw = yaw * M_PI / 180.0f;
+            float radPitch = pitch * M_PI / 180.0f;
+
+            // Direção do chute
+            pushDirX = cos(radYaw) * cos(radPitch);
+            pushDirZ = sin(radYaw) * cos(radPitch);
+            pushDirY = sin(radPitch); // Para chutar para cima
+
+            // Aplica a força do chute
+            ballSpeed = kick;
+            force = 0.2f * pushDirY; // Define a força de elevação
+            ballHit = true;
+        }
+    }
+}
+
 void keyboard(unsigned char key, int x, int y) {
     float moveX = dirX * velocidade;
     float moveZ = dirZ * velocidade;
@@ -413,6 +499,10 @@ void keyboard(unsigned char key, int x, int y) {
         case 27:
             exit(0);
             break;
+        case 13:
+            pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -6.0f;
+            break;
+
     }
     glutPostRedisplay();
 }
@@ -431,8 +521,6 @@ void display() {
     Grid();
     Sky(50.0f);
     Ball();
-    BallRot();
-    BallPos();
     Player();
     if (isMoving) {
         passo += 0.2f; // Atualiza o efeito de caminhada
@@ -478,17 +566,19 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(larguraJanela, alturaJanela);
     glutInitWindowPosition(100, 100);
-    glutCreateWindow("Movimentacao FPS com OpenGL");
+    glutCreateWindow("Fut");
 
     init();
-    //load_texture(&skyboxTexture, "ceu.png");
+    load_texture(&skyboxTexture, "ceu.png");
     load_texture(&ballTexture, "ball.jpg");
     load_texture(&groundTexture, "glass.jpg");
+    load_texture(&logoTexture, "skol.jpg");
     glutFullScreen();
     
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
+    glutMouseFunc(mouseClick);
     glutPassiveMotionFunc(mouseMotion);
 
     glutWarpPointer(larguraJanela / 2, alturaJanela / 2);
