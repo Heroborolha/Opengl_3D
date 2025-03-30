@@ -5,6 +5,10 @@
 #include <stdio.h>
 using Vector3f = glm::vec3;
 
+GLUquadric* shadowDisk = NULL;  // Objeto para o disco da sombra
+float shadowOpacity = 0.5f;     // Opacidade da sombra (0.0 a 1.0)
+float shadowSizeFactor = 1.2f;  // Tamanho da sombra relativo à bola
+
 GLuint skyboxTexture = 0, groundTexture = 0, ballTexture = 0, logoTexture = 0;
 // Posição da câmera
 float camX = 0.0f, camY = 1.0f, camZ = 5.0f;
@@ -20,11 +24,11 @@ float velocidade = 0.1f;
 float playerX, playerY, playerZ; // Posição do jogador (centro do corpo)
 float pernaEsqX, pernaEsqY, pernaEsqZ;
 float pernaDirX, pernaDirY, pernaDirZ;
-float kick = 0.16f;
+float kick = 0.18f;
 float passo = 0.0f; // Controle do efeito de caminhada
 
 // Variáveis do goleiro
-float goleiroX = 0.0f, goleiroY = 0.0f, goleiroZ = -6.7f;
+float goleiroX = 0.0f, goleiroY = -0.1f, goleiroZ = -6.7f;
 float goleiroVel = 0.05f;
 bool goleiroDefendendo = false;
 float goleiroTempoReacao = 0.5f; // Tempo de reação antes de começar a se mover
@@ -37,6 +41,8 @@ float pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -3.0f;
 float ballRotX = 0.0f, ballRotZ = 0.0f;
 float ballRotationAngle = 0.0f;
 float ballRadius = 0.2f;
+int golsMarcados = 0;             // Contador de gols
+float ballCurrentScale = 1.0f;
 float groundY = -1.0f;  // Altura do chão
 
 bool mostrarSeta = false;
@@ -125,6 +131,33 @@ Vector3f ObterDirecaoSeta(){
     direcao.z = cos(anguloHorizontal) * cos(anguloVertical);
     
     return glm::normalize(direcao);
+}
+
+void OnGolMarcado(){
+
+    const float traveEsquerdaX = -1.5f;  // Metade da largura da trave (3.0/2)
+    const float traveDireitaX = 1.5f;
+    const float traveZ = -7.0f;  // Posição Z da trave
+    const float alturaTrave = 2.5f;
+    const float baseTraveY = -0.8f;
+
+    // Verifica se a bola ultrapassou a linha do gol (Z < -9.0) 
+    // E está dentro da área da trave (X entre -1.5 e 1.5)
+    // E está abaixo da altura da trave (Y < baseTraveY + alturaTrave)
+    if (pos_ballZ < -9.0f && 
+        pos_ballX > traveEsquerdaX && pos_ballX < traveDireitaX &&
+        pos_ballY < (baseTraveY + alturaTrave)) {
+        
+        golsMarcados++;
+        ballCurrentScale *= 1.6f;
+        ballRadius = 0.2f * ballCurrentScale;
+        
+        if (ballCurrentScale > 16.0f) {
+            ballCurrentScale = 16.0f;
+            ballRadius = 0.2f * 16.0f;
+        }
+        pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -3.0f;
+    } 
 }
 
 void BallPos(){
@@ -222,7 +255,7 @@ void load_texture(GLuint* texture, const char* image_location){
 void init(){
     GLfloat lightenv[] = {0.2, 0.2, 0.2, 1.0};
     GLfloat lightColor[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    GLfloat lightPos[] = {2.0f, 12.0f, 0.0f, 1.0f};  // 2.0f, 0.0f, -5.0f
+    GLfloat lightPos[] = {2.0f, 40.0f, 0.0f, 1.0f}; 
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
@@ -239,6 +272,30 @@ void init(){
     glEnable(GL_NORMALIZE);
 
     glutSetCursor(GLUT_CURSOR_NONE);
+}
+
+void Shadow() {
+    if (!shadowDisk) {
+        shadowDisk = gluNewQuadric();  // Cria o objeto apenas uma vez
+    }
+
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    glColor4f(0.0f, 0.0f, 0.0f, shadowOpacity);  // Preto com transparência
+    
+    glPushMatrix();
+        // Posiciona a sombra no chão (groundY) e ligeiramente acima para evitar z-fighting
+        glTranslatef(pos_ballX, groundY + 0.01f, pos_ballZ);
+        
+        // Alinha com o chão e ajusta o tamanho
+        glRotatef(90, 1, 0, 0);  // Rotaciona para ficar horizontal
+        gluDisk(shadowDisk, 0, ballRadius * shadowSizeFactor, 32, 1);
+    glPopMatrix();
+
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
 }
 
 void Player() {
@@ -335,9 +392,12 @@ void AtualizarGoleiro() {
                 goleiroY = goleiroAlturaMergulho;
                 
                 // Verificação de colisão universal
-                if (CheckCollision(goleiroX, goleiroY, goleiroZ, 0.5f, 
+                if (CheckCollision(goleiroX, goleiroY, goleiroZ, 1.3f, 
                                  pos_ballX, pos_ballY, pos_ballZ, ballRadius)) {
                     ballHit = false;
+                    pushDirX *= -0.8f;
+                    pushDirZ *= -0.8f;
+                    ballSpeed *= 0.7f;
                     ballSpeed = 0.0f;
                     force = 0.0f;
                 }
@@ -439,36 +499,65 @@ void Grid(){
     glEnd();
 }
 
-void Trave(){
-    GLUquadric* quadric = gluNewQuadric();
+void Trave() {
+    GLUquadric* trave = gluNewQuadric();
     glColor3f(1.0, 1.0, 1.0);  // Cor branca da trave
 
-    float altura = 2.5f;
-    float largura = 3.0f;
-    float espessura = 0.1f;
+    // Dimensões da trave
+    const float altura = 2.5f;
+    const float largura = 3.0f;
+    const float espessura = 0.1f;
+    const float zPos = -7.0f;  // Posição Z fixa da trave
+    const float baseY = -0.8f;  // Altura base da trave
 
-    glPushMatrix();
-        // Poste esquerdo
-        glTranslatef(-largura / 2, -0.8f, -7.0f);
-        glRotatef(-90, 1, 0, 0);
-        gluCylinder(quadric, espessura, espessura, altura, 20, 20);
-    glPopMatrix();
+    // Partes da trave (3 cilindros)
+    enum ParteTrave { POSTE_ESQ, POSTE_DIR, BARRA_SUP };
+    struct {
+        float x, y, z;
+        float rotX, rotY, rotZ;
+        float comprimento;
+    } partes[3] = {
+        { -largura/2, baseY, zPos, -90, 0, 0, altura },    // Poste esquerdo
+        { largura/2, baseY, zPos, -90, 0, 0, altura },     // Poste direito
+        { -largura/2, altura + baseY, zPos, 0, 90, 0, largura }  // Barra superior
+    };
 
-    glPushMatrix();
-        // Poste direito
-        glTranslatef(largura / 2, -0.8f, -7.0f);
-        glRotatef(-90, 1, 0, 0);
-        gluCylinder(quadric, espessura, espessura, altura, 20, 20);
-    glPopMatrix();
+    // Desenha e verifica colisão para cada parte
+    for (int i = 0; i < 3; i++) {
+        glPushMatrix();
+            glTranslatef(partes[i].x, partes[i].y, partes[i].z);
+            glRotatef(partes[i].rotX, 1, 0, 0);
+            glRotatef(partes[i].rotY, 0, 1, 0);
+            glRotatef(partes[i].rotZ, 0, 0, 1);
+            gluCylinder(trave, espessura, espessura, partes[i].comprimento, 20, 20);
+            
+            // Verifica colisão durante o jogo
+            if (ballHit) {
+                // Calcula posição global da parte da trave mais próxima da bola
+                float parteX = partes[i].x;
+                float parteY = partes[i].y;
+                float parteZ = partes[i].z;
+                
+                // Aproximação: trata cada parte como uma série de esferas ao longo do cilindro
+                for (float t = 0; t <= 1.0; t += 0.2f) {
+                    float pontoX = parteX + (i == BARRA_SUP ? partes[i].comprimento * t : 0);
+                    float pontoY = parteY + (i != BARRA_SUP ? partes[i].comprimento * t : 0);
+                    float pontoZ = parteZ;
+                    
+                    if (CheckCollision(pontoX, pontoY, pontoZ, espessura,
+                                      pos_ballX, pos_ballY, pos_ballZ, ballRadius)) {
+                        // Rebate a bola
+                        pushDirX *= -0.8f;
+                        pushDirZ *= -0.8f;
+                        ballSpeed *= 0.7f;
+                        break;
+                    }
+                }
+            }
+        glPopMatrix();
+    }
 
-    glPushMatrix();
-        // Barra transversal
-        glTranslatef(-largura / 2, altura - 0.8f, -7.0f);
-        glRotatef(90, 0, 1, 0);
-        gluCylinder(quadric, espessura, espessura, largura, 20, 20);
-    glPopMatrix();
-
-    gluDeleteQuadric(quadric);
+    gluDeleteQuadric(trave);
 }
 
 void Rede(){
@@ -529,22 +618,24 @@ void Rede(){
 }
 
 void Ball(){
-    GLUquadric* quadric = gluNewQuadric();  
+    GLUquadric* ball = gluNewQuadric(); 
+    Shadow(); 
 
     glPushMatrix();
         glEnable(GL_TEXTURE_2D);  
         glBindTexture(GL_TEXTURE_2D, ballTexture);  
 
-        gluQuadricTexture(quadric, GL_TRUE);  
+        gluQuadricTexture(ball, GL_TRUE);  
         glColor3f(1.0, 1.0, 1.0);  
         glTranslatef(pos_ballX, pos_ballY, pos_ballZ);
         glRotatef(ballRotationAngle, ballRotX, 0.0f, ballRotZ);
-        gluSphere(quadric, ballRadius, 30, 30);  
+        glScalef(ballCurrentScale, ballCurrentScale, ballCurrentScale);
+        gluSphere(ball, 0.2f, 30, 30);  
 
         glDisable(GL_TEXTURE_2D);  
     glPopMatrix();
 
-    gluDeleteQuadric(quadric);  
+    gluDeleteQuadric(ball);  
 }
 
 void mouseMotion(int x, int y) {
@@ -637,7 +728,7 @@ void keyboardUp(unsigned char key, int x, int y) {
             break;
     }
 }
-void display() {
+void display(){
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
@@ -658,6 +749,7 @@ void display() {
     Player();
     Goleiro();
     PlayerPos();
+    OnGolMarcado();
 
     glPushMatrix();
         glDisable(GL_LIGHTING);  // Desativa a iluminação para a esfera da luz
