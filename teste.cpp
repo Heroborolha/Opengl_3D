@@ -1,7 +1,9 @@
 #include <GL/freeglut.h>
 #include <SOIL/SOIL.h>
+#include <glm/glm.hpp>
 #include <cmath>
 #include <stdio.h>
+using Vector3f = glm::vec3;
 
 GLuint skyboxTexture = 0, groundTexture = 0, ballTexture = 0, logoTexture = 0;
 // Posição da câmera
@@ -18,15 +20,35 @@ float velocidade = 0.1f;
 float playerX, playerY, playerZ; // Posição do jogador (centro do corpo)
 float pernaEsqX, pernaEsqY, pernaEsqZ;
 float pernaDirX, pernaDirY, pernaDirZ;
-float kick = 0.98f;
+float kick = 0.16f;
 float passo = 0.0f; // Controle do efeito de caminhada
 
+// Variáveis do goleiro
+float goleiroX = 0.0f, goleiroY = 0.0f, goleiroZ = -6.7f;
+float goleiroVel = 0.05f;
+bool goleiroDefendendo = false;
+float goleiroTempoReacao = 0.5f; // Tempo de reação antes de começar a se mover
+float goleiroTimer = 0.0f;
+float goleiroAlturaMergulho = 0.5f;
+float goleiroLargura = 3.0f; // Largura da área que o goleiro cobre
+
 // Variáveis globais para posição da bola
-float pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -6.0f;
+float pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -3.0f;
 float ballRotX = 0.0f, ballRotZ = 0.0f;
 float ballRotationAngle = 0.0f;
 float ballRadius = 0.2f;
 float groundY = -1.0f;  // Altura do chão
+
+bool mostrarSeta = false;
+bool preparandoChute = false;
+bool espacoPressionado = false;
+float setaRotacao = 0.0f; // Rotação da seta em torno do eixo Y
+float setaAltura = 0.2f;  // Altura da seta em relação à bola
+float tempoSetaVisivel = 0.0f;
+const float TEMPO_MAXIMO_SETA = 2.0f;
+float tempoPressionado = 0.0f;
+const float TEMPO_MAX_CHUTE = 1.5f;
+Vector3f setaCor(0.0f, 1.0f, 0.0f); // Cor verde para a seta
 
 bool isMoving = false;
 bool ballHit = false;  // Indica se a bola foi atingida
@@ -42,17 +64,71 @@ bool checkCollisionWithGround(){
     return (pos_ballY - ballRadius <= groundY);
 }
 
-bool checkCollisionWithPlayer(){
-    float dx = pernaEsqX - pos_ballX;
-    float dy = pernaEsqY - pos_ballY;
-    float dz = pernaEsqZ - pos_ballZ;
-    float distance = sqrt(dx*dx + dy*dy + dz*dz);
+bool CheckCollision(float obj1X, float obj1Y, float obj1Z, float obj1Radius,
+    float obj2X, float obj2Y, float obj2Z, float obj2Radius) {
+    float dx = obj1X - obj2X;
+    float dy = obj1Y - obj2Y;
+    float dz = obj1Z - obj2Z;
+    float distance = dx*dx + dy*dy + dz*dz;
 
-    return (distance < ballRadius + 0.5); // Se a distância for menor que o raio da bola, há colisão
+    float combinedRadius = obj1Radius + obj2Radius;
+
+    return (distance < combinedRadius * combinedRadius);
+}
+
+void DesenharSeta() {
+    if (!mostrarSeta) return;
+
+    glPushMatrix();
+        // Posição ajustada (1 unidade acima e 1 unidade à frente do jogador)
+        glTranslatef(playerX, playerY + 0.8f, playerZ - 0.7f);
+        
+        // Cálculo dos ângulos corretos
+        float anguloHorizontal = atan2(dirX, dirZ) * (180.0f/M_PI);
+        float anguloVertical = -asin(dirY) * (180.0f/M_PI);
+        
+        // Ordem CORRETA das rotações:
+        glRotatef(anguloHorizontal, 0.0f, 1.0f, 0.0f);  // 1. Rotação horizontal
+        glRotatef(anguloVertical, 1.0f, 0.0f, 0.0f);    // 2. Rotação vertical (eixo Z)
+        
+        // Rotação de correção do modelo
+        glRotatef(10.0f, 1.0f, 0.0f, 0.0f);  // 3. Corrige orientação padrão
+        
+        // Escala
+        glScalef(0.5f, 0.5f, 0.5f);
+        
+        // Cor (vermelho)
+        glColor3f(1.0f, 0.0f, 0.0f);
+        
+        // Desenho da seta CORRETAMENTE ORIENTADA
+        glPushMatrix();
+            // Haste (apontando para frente)
+            glTranslatef(0.0f, 0.0f, -0.5f);
+            glutSolidCylinder(0.05f, 1.0f, 10, 10);
+            
+            // Ponta (direção do chute)
+            glTranslatef(0.0f, 0.0f, 1.0f);
+            glutSolidCone(0.15f, 0.4f, 10, 10);
+        glPopMatrix();
+    glPopMatrix();
+}
+
+Vector3f ObterDirecaoSeta(){
+    // Recria as transformações da seta para obter a direção
+    float anguloHorizontal = atan2(dirX, dirZ);
+    float anguloVertical = -asin(dirY);
+    
+    // Calcula a direção baseada nos ângulos
+    Vector3f direcao;
+    direcao.x = sin(anguloHorizontal) * cos(anguloVertical);
+    direcao.y = sin(anguloVertical);
+    direcao.z = cos(anguloHorizontal) * cos(anguloVertical);
+    
+    return glm::normalize(direcao);
 }
 
 void BallPos(){
-    pos_ballY -= 0.01f * friction; // Simula gravidade (queda)
+    pos_ballY -= 0.03f * friction; // Simula gravidade (queda)
 
     // Se a bola atinge o chão
     if (checkCollisionWithGround()) {
@@ -73,9 +149,12 @@ void BallPos(){
         float prevX = pos_ballX;
         float prevZ = pos_ballZ;
 
-        pos_ballX += pushDirX * ballSpeed;
-        pos_ballZ += pushDirZ * ballSpeed;
-        pos_ballY += force;
+        Vector3f direcao = ObterDirecaoSeta();
+        
+        // Movimento da bola na direção da seta
+        pos_ballX += direcao.x * ballSpeed;
+        pos_ballZ += direcao.z * ballSpeed;
+        pos_ballY += direcao.y * ballSpeed + force;
          
         // Reduz a velocidade gradualmente (simulando atrito)
         ballSpeed *= friction; 
@@ -111,7 +190,7 @@ void BallPos(){
 void BallRot(){
 
     float maxspeed = 0.04f;
-    if (checkCollisionWithPlayer()) { 
+    if (CheckCollision(pernaEsqX, pernaEsqY, pernaEsqZ, 0.5f, pos_ballX, pos_ballY, pos_ballZ, ballRadius)){ 
         // Calcula a direção do empurrão (inverso da posição relativa do player)
         float dx = pos_ballX - pernaEsqX;
         float dz = pos_ballZ - pernaEsqZ;
@@ -124,9 +203,6 @@ void BallRot(){
             pushDirX = 0.0f;
             pushDirZ = 0.0f;
         }
-
-        ballSpeed = maxspeed;
-        ballHit = true;
     }
 }
 
@@ -203,54 +279,99 @@ void PlayerPos() {
     pernaDirZ = playerZ - deslocamento; // Alternando para trás
 }
 
-void Sky(float tamanho){
+void Goleiro(){
+    glPushMatrix();
+        glTranslatef(goleiroX, goleiroY, goleiroZ);
+        glColor3f(0.8f, 0.8f, 0.8f); // Cor do uniforme
+        
+        // Corpo
+        glPushMatrix();
+            glScalef(0.5f, 1.5f, 0.3f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+        
+        // Braços (em posição de defesa)
+        glPushMatrix();
+            glTranslatef(0.4f, 0.2f, 0.0f);
+            glRotatef(45.0f, 0.0f, 0.0f, 1.0f);
+            glScalef(0.2f, 0.8f, 0.2f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+        
+        glPushMatrix();
+            glTranslatef(-0.4f, 0.2f, 0.0f);
+            glRotatef(-45.0f, 0.0f, 0.0f, 1.0f);
+            glScalef(0.2f, 0.8f, 0.2f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+    glPopMatrix();
+}
+
+void AtualizarGoleiro() {
+    static float pesoEsquerda = 0.5f;
+    static float pesoDireita = 0.5f;
+    static bool primeiraVez = true;
+
+    if (ballHit && !goleiroDefendendo) {
+        if (primeiraVez) {
+            pesoEsquerda = static_cast<float>(rand()) / RAND_MAX;
+            pesoDireita = 1.0f - pesoEsquerda;
+            primeiraVez = false;
+        }
+
+        goleiroTimer += 0.016f;
+        
+        if (goleiroTimer >= goleiroTempoReacao) {
+            float direcao = (pesoEsquerda > pesoDireita) ? -0.8f : 0.8f;
+            float targetX = direcao * goleiroLargura/2;
+            
+            float dx = targetX - goleiroX;
+            if (fabs(dx) > 0.1f) {
+                goleiroX += (dx > 0 ? 1 : -1) * goleiroVel;
+            }
+            
+            if (goleiroTimer >= goleiroTempoReacao + 0.5f) {
+                goleiroDefendendo = true;
+                goleiroY = goleiroAlturaMergulho;
+                
+                // Verificação de colisão universal
+                if (CheckCollision(goleiroX, goleiroY, goleiroZ, 0.5f, 
+                                 pos_ballX, pos_ballY, pos_ballZ, ballRadius)) {
+                    ballHit = false;
+                    ballSpeed = 0.0f;
+                    force = 0.0f;
+                }
+            }
+        }
+    } else if (!ballHit) {
+        goleiroDefendendo = false;
+        goleiroTimer = 0.0f;
+        goleiroX *= 0.95f;
+        goleiroY *= 0.95f;
+        primeiraVez = true;
+    }
+}
+
+void Sky(float raio) {
     glDisable(GL_LIGHTING);
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, skyboxTexture);
-
-    float t = tamanho / 2.0f;
+    
+    // Configuração para evitar problemas de profundidade
+    glDepthMask(GL_FALSE);
+    
     glPushMatrix();
-        glTranslatef(camX, camY, camZ);  // Move o cubo para sempre estar na posição da câmera
-
-        glBegin(GL_QUADS);
-        // Frente
-        glTexCoord2f(0.25f, 0.33f); glVertex3f(-t, -t, -t);
-        glTexCoord2f(0.50f, 0.33f); glVertex3f(t, -t, -t);
-        glTexCoord2f(0.50f, 0.66f); glVertex3f(t, t, -t);
-        glTexCoord2f(0.25f, 0.66f); glVertex3f(-t, t, -t);
+        glTranslatef(camX, camY, camZ);  // Centraliza na câmera
+        glRotatef(90, 1, 0, 0);  // Ajusta a orientação da esfera
         
-        // Fundo
-        glTexCoord2f(0.75f, 0.33f); glVertex3f(t, -t, t);
-        glTexCoord2f(1.00f, 0.33f); glVertex3f(-t, -t, t);
-        glTexCoord2f(1.00f, 0.66f); glVertex3f(-t, t, t);
-        glTexCoord2f(0.75f, 0.66f); glVertex3f(t, t, t);
-        
-        // Esquerda
-        glTexCoord2f(0.00f, 0.33f); glVertex3f(-t, -t, t);
-        glTexCoord2f(0.25f, 0.33f); glVertex3f(-t, -t, -t);
-        glTexCoord2f(0.25f, 0.66f); glVertex3f(-t, t, -t);
-        glTexCoord2f(0.00f, 0.66f); glVertex3f(-t, t, t);
-        
-        // Direita
-        glTexCoord2f(0.50f, 0.33f); glVertex3f(t, -t, -t);
-        glTexCoord2f(0.75f, 0.33f); glVertex3f(t, -t, t);
-        glTexCoord2f(0.75f, 0.66f); glVertex3f(t, t, t);
-        glTexCoord2f(0.50f, 0.66f); glVertex3f(t, t, -t);
-        
-        // Cima
-        glTexCoord2f(0.25f, 0.66f); glVertex3f(-t, t, -t);
-        glTexCoord2f(0.50f, 0.66f); glVertex3f(t, t, -t);
-        glTexCoord2f(0.50f, 1.00f); glVertex3f(t, t, t);
-        glTexCoord2f(0.25f, 1.00f); glVertex3f(-t, t, t);
-        
-        // Baixo
-        glTexCoord2f(0.25f, 0.00f); glVertex3f(-t, -t, -t);
-        glTexCoord2f(0.50f, 0.00f); glVertex3f(t, -t, -t);
-        glTexCoord2f(0.50f, 0.33f); glVertex3f(t, -t, t);
-        glTexCoord2f(0.25f, 0.33f); glVertex3f(-t, -t, t);
-        glEnd();
+        GLUquadricObj *esfera = gluNewQuadric();
+        gluQuadricTexture(esfera, GL_TRUE);
+        gluQuadricNormals(esfera, GLU_SMOOTH);
+        gluSphere(esfera, raio, 64, 64);
+        gluDeleteQuadric(esfera);
     glPopMatrix();
-
+    
+    glDepthMask(GL_TRUE);
     glEnable(GL_LIGHTING);
 }
 
@@ -452,26 +573,6 @@ void mouseMotion(int x, int y) {
     glutPostRedisplay();
 }
 
-void mouseClick(int button, int state, int x, int y){
-    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
-        if (checkCollisionWithPlayer()) {
-            // Calcula a direção do chute baseada na câmera (para onde o jogador está olhando)
-            float radYaw = yaw * M_PI / 180.0f;
-            float radPitch = pitch * M_PI / 180.0f;
-
-            // Direção do chute
-            pushDirX = cos(radYaw) * cos(radPitch);
-            pushDirZ = sin(radYaw) * cos(radPitch);
-            pushDirY = sin(radPitch); // Para chutar para cima
-
-            // Aplica a força do chute
-            ballSpeed = kick;
-            force = 0.2f * pushDirY; // Define a força de elevação
-            ballHit = true;
-        }
-    }
-}
-
 void keyboard(unsigned char key, int x, int y) {
     float moveX = dirX * velocidade;
     float moveZ = dirZ * velocidade;
@@ -496,18 +597,48 @@ void keyboard(unsigned char key, int x, int y) {
             camZ += moveX;
             isMoving = true;
             break;
+        case 32: // Tecla ESPAÇO
+            if (CheckCollision(pernaEsqX, pernaEsqY, pernaEsqZ, 0.5f, pos_ballX, pos_ballY, pos_ballZ, ballRadius) && !espacoPressionado) {
+                espacoPressionado = true;
+                mostrarSeta = true;
+                tempoPressionado = 0.0f;
+            }
+            break;
         case 27:
             exit(0);
             break;
         case 13:
-            pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -6.0f;
+            pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -3.0f;
             break;
 
     }
     glutPostRedisplay();
 }
 
+void keyboardUp(unsigned char key, int x, int y) {
+    switch (key) {
+        case 32: // ESPAÇO
+            if (espacoPressionado) {
+                espacoPressionado = false;
+                mostrarSeta = false;
+                
+                if(CheckCollision(pernaEsqX, pernaEsqY, pernaEsqZ, 0.5f, pos_ballX, pos_ballY, pos_ballZ, ballRadius)) {
+                    pushDirX = dirX;
+                    pushDirY = dirY;
+                    pushDirZ = dirZ;
+                    
+                    // Potência proporcional ao tempo pressionado
+                    float potencia = fmin(1.0f, tempoPressionado/TEMPO_MAX_CHUTE);
+                    ballSpeed = kick * (0.5f + potencia*0.5f); // 50-100%
+                    force = 0.2f * (1.0f + potencia);
+                    ballHit = true;
+                }
+            }
+            break;
+    }
+}
 void display() {
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
     glMatrixMode(GL_MODELVIEW);
@@ -517,14 +648,15 @@ void display() {
               camX + dirX, camY + dirY, camZ + dirZ, 
               0.0f, 1.0f, 0.0f);
 
+    if(isMoving) passo += 0.2f;
+
     Chao();
     Grid();
     Sky(50.0f);
+    DesenharSeta();
     Ball();
     Player();
-    if (isMoving) {
-        passo += 0.2f; // Atualiza o efeito de caminhada
-    }
+    Goleiro();
     PlayerPos();
 
     glPushMatrix();
@@ -557,7 +689,20 @@ void reshape(int w, int h) {
 void update(int value) {
     BallRot();
     BallPos();
+    AtualizarGoleiro();
     glutPostRedisplay();
+    if (espacoPressionado) {
+        tempoPressionado += 0.016f; // ~60fps
+        if (tempoPressionado >= TEMPO_MAX_CHUTE) {
+            tempoPressionado = TEMPO_MAX_CHUTE;
+            // Feedback visual quando atinge máximo
+            setaCor = Vector3f(1.0f, 0.0f, 0.0f); // Vermelho forte
+        } else {
+            // Gradiente de cor (amarelo -> vermelho)
+            float progresso = tempoPressionado/TEMPO_MAX_CHUTE;
+            setaCor = Vector3f(1.0f, 1.0f - progresso, 0.0f);
+        }
+    }
     glutTimerFunc(16, update, 0); // Atualiza a cada ~16ms (aproximadamente 60 FPS)
 }
 
@@ -578,7 +723,7 @@ int main(int argc, char** argv) {
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
-    glutMouseFunc(mouseClick);
+    glutKeyboardUpFunc(keyboardUp);
     glutPassiveMotionFunc(mouseMotion);
 
     glutWarpPointer(larguraJanela / 2, alturaJanela / 2);
