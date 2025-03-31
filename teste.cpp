@@ -11,7 +11,7 @@ float shadowSizeFactor = 1.2f;  // Tamanho da sombra relativo à bola
 
 GLuint skyboxTexture = 0, groundTexture = 0, ballTexture = 0, logoTexture = 0;
 // Posição da câmera
-float camX = 0.0f, camY = -0.1f, camZ = -1.3f;
+float camX = 0.0f, camY = 1.3f, camZ = 1.3f;
 // Direção que a câmera está olhando
 float dirX = 0.0f, dirY = 0.0f, dirZ = -1.0f;
 // Ângulos para controle do mouse
@@ -22,15 +22,14 @@ float sensibilidade = 0.1f;
 float velocidade = 0.1f;
 
 float playerX, playerY, playerZ; // Posição do jogador (centro do corpo)
-float kick = 0.26f;
+float kick = 0.22f;
 
 // Variáveis do goleiro
-float goleiroX = 0.0f, goleiroY = -0.08f, goleiroZ = -6.7f;
+float goleiroX = 0.0f, goleiroY = 0.1f, goleiroZ = -6.7f;
 float goleiroVel = 0.05f;
 bool goleiroDefendendo = false;
 float goleiroTempoReacao = 0.5f; // Tempo de reação antes de começar a se mover
 float goleiroTimer = 0.0f;
-float goleiroAlturaMergulho = 0.5f;
 float goleiroLargura = 3.0f; // Largura da área que o goleiro cobre
 
 // Variáveis globais para posição da bola
@@ -115,7 +114,7 @@ void DesenharSeta() {
 Vector3f ObterDirecaoSeta(){
     // Recria as transformações da seta para obter a direção
     float anguloHorizontal = atan2(dirX, dirZ);
-    float anguloVertical = -asin(dirY);
+    float anguloVertical = asin(dirY);
     
     // Calcula a direção baseada nos ângulos
     Vector3f direcao;
@@ -126,7 +125,7 @@ Vector3f ObterDirecaoSeta(){
     return glm::normalize(direcao);
 }
 
-void OnGolMarcado(){
+void Goal(){
 
     const float traveEsquerdaX = -1.5f;  // Metade da largura da trave (3.0/2)
     const float traveDireitaX = 1.5f;
@@ -137,21 +136,21 @@ void OnGolMarcado(){
     // Verifica se a bola ultrapassou a linha do gol (Z < -9.0) 
     // E está dentro da área da trave (X entre -1.5 e 1.5)
     // E está abaixo da altura da trave (Y < baseTraveY + alturaTrave)
-    if (pos_ballZ < -8.6f && 
+    if(pos_ballZ < -8.6f && 
         pos_ballX > traveEsquerdaX && pos_ballX < traveDireitaX &&
-        pos_ballY < (baseTraveY + alturaTrave)) {
+        pos_ballY < (baseTraveY + alturaTrave)){
         
         golsMarcados++;
-        ballCurrentScale *= 1.6f;
+        ballCurrentScale *= 1.4f;
         ballRadius = 0.2f * ballCurrentScale;
         
-        if (ballCurrentScale > 16.0f) {
-            ballCurrentScale = 16.0f;
-            ballRadius = 0.2f * 16.0f;
+        if (ballCurrentScale > 6.0f) {
+            ballCurrentScale = 6.0f;
+            ballRadius = 0.2f * 6.0f;
         }
         pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -3.0f;
         ballSpeed = 0.0f;
-    } 
+    }
 }
 
 void BallPos(){
@@ -211,25 +210,6 @@ void BallPos(){
         ballRotX = pushDirZ;  // O eixo de rotação deve ser perpendicular ao movimento
         ballRotZ = -pushDirX; // Mantém a rotação correta ao longo do deslocamento
 
-    }
-}
-
-void BallRot(){
-
-    float maxspeed = 0.04f;
-    if (!espacoPressionado){ 
-        // Calcula a direção do empurrão (inverso da posição relativa do player)
-        float dx = pos_ballX;
-        float dz = pos_ballZ; 
-        float length = sqrt(dx*dx + dz*dz);
-
-        if (length > 0.0f) {
-            pushDirX = dx / length;
-            pushDirZ = dz / length;
-        } else {
-            pushDirX = 0.0f;
-            pushDirZ = 0.0f;
-        }
     }
 }
 
@@ -299,6 +279,7 @@ void PlayerPos() {
 }
 
 void Goleiro(){
+
     glPushMatrix();
         glTranslatef(goleiroX, goleiroY, goleiroZ);
         glColor3f(0.8f, 0.8f, 0.8f); // Cor do uniforme
@@ -327,9 +308,15 @@ void Goleiro(){
 }
 
 void AtualizarGoleiro() {
+
     static float pesoEsquerda = 0.5f;
     static float pesoDireita = 0.5f;
     static bool primeiraVez = true;
+
+    // Dimensões do goleiro (ajuste conforme necessário)
+    const float GOLEIRO_LARGURA = 1.0f;  // Largura total do goleiro
+    const float GOLEIRO_ALTURA = 1.6f;   // Altura do goleiro
+    const float GOLEIRO_ESPESSURA = 0.3f; // Profundidade/espessura
 
     if (ballHit && !goleiroDefendendo) {
         if (primeiraVez) {
@@ -351,19 +338,30 @@ void AtualizarGoleiro() {
             
             if (goleiroTimer >= goleiroTempoReacao + 0.5f) {
                 goleiroDefendendo = true;
-                goleiroY = goleiroAlturaMergulho;
-                
+                printf("Goleiro = %f\n", goleiroX);
+                printf("ballX = %f\n", pos_ballX);
+                printf("ballY = %f\n", pos_ballY);
                 // Verificação de colisão universal
-                if (CheckCollision(goleiroX, goleiroY, goleiroZ, 1.0f, 
-                                 pos_ballX, pos_ballY, pos_ballZ, ballRadius)) {
-                    ballHit = false;
-                    pos_ballZ = ballRadius + goleiroZ;
-                    pushDirX *= -0.8f;
-                    pushDirZ *= -1.8f;
-                    ballSpeed *= 0.7f;
-                    //ballSpeed = 0.0f;
-                    force = 0.0f;
+            if((pos_ballX >= goleiroX || pos_ballX <= goleiroX) &&
+            pos_ballY <= (goleiroY + GOLEIRO_ALTURA) &&
+            pos_ballZ + ballRadius <= goleiroZ){
+
+                ballHit = false;
+                pos_ballZ = ballRadius + goleiroZ;
+                pushDirX *= -0.8f;
+                pushDirZ *= -1.8f;
+                ballSpeed *= 0.7f;
+                ballSpeed = 0.0f;
+                force = 0.0f;
+                ballCurrentScale *= 0.6f;
+                ballRadius = 0.2f * ballCurrentScale;
+                
+                if (ballCurrentScale < 0.2f) {
+                    ballCurrentScale = 1.0f;
+                    ballRadius = 0.2f;
                 }
+                //pos_ballX = 0.0f, pos_ballY = 0.0f, pos_ballZ = -3.0f;
+            }
             }
         }
     } else if (!ballHit) {
@@ -450,75 +448,36 @@ void Chao(){
     glDisable(GL_TEXTURE_2D);
 }
 
-void Grid(){
-    glColor3f(0.3f, 0.3f, 0.3f); 
-    glBegin(GL_LINES);
-    for (float i = -10; i <= 10; i += 1.0) {
-        glVertex3f(i, -1.0f, -10.0f);
-        glVertex3f(i, -1.0f, 10.0f);
-        glVertex3f(-10.0f, -1.0f, i);
-        glVertex3f(10.0f, -1.0f, i);
-    }
-    glEnd();
-}
+void Trave(){
 
-void Trave() {
     GLUquadric* trave = gluNewQuadric();
     glColor3f(1.0, 1.0, 1.0);  // Cor branca da trave
 
-    // Dimensões da trave
-    const float altura = 2.5f;
-    const float largura = 3.0f;
-    const float espessura = 0.1f;
-    const float zPos = -7.0f;  // Posição Z fixa da trave
-    const float baseY = -0.8f;  // Altura base da trave
+    float altura = 2.5f;
+    float largura = 3.0f;
+    float espessura = 0.1f;
+    float traveY = -0.8f,traveZ = -7.0f;
 
-    // Partes da trave (3 cilindros)
-    enum ParteTrave { POSTE_ESQ, POSTE_DIR, BARRA_SUP };
-    struct {
-        float x, y, z;
-        float rotX, rotY, rotZ;
-        float comprimento;
-    } partes[3] = {
-        { -largura/2, baseY, zPos, -90, 0, 0, altura },    // Poste esquerdo
-        { largura/2, baseY, zPos, -90, 0, 0, altura },     // Poste direito
-        { -largura/2, altura + baseY, zPos, 0, 90, 0, largura }  // Barra superior
-    };
+    glPushMatrix();
+        // Poste esquerdo
+        glTranslatef(-largura / 2, traveY, traveZ);
+        glRotatef(-90, 1, 0, 0);
+        gluCylinder(trave, espessura, espessura, altura, 20, 20);
+    glPopMatrix();
 
-    // Desenha e verifica colisão para cada parte
-    for (int i = 0; i < 3; i++) {
-        glPushMatrix();
-            glTranslatef(partes[i].x, partes[i].y, partes[i].z);
-            glRotatef(partes[i].rotX, 1, 0, 0);
-            glRotatef(partes[i].rotY, 0, 1, 0);
-            glRotatef(partes[i].rotZ, 0, 0, 1);
-            gluCylinder(trave, espessura, espessura, partes[i].comprimento, 20, 20);
-            
-            // Verifica colisão durante o jogo
-            if (ballHit) {
-                // Calcula posição global da parte da trave mais próxima da bola
-                float parteX = partes[i].x;
-                float parteY = partes[i].y;
-                float parteZ = partes[i].z;
-                
-                // Aproximação: trata cada parte como uma série de esferas ao longo do cilindro
-                for (float t = 0; t <= 1.0; t += 0.2f) {
-                    float pontoX = parteX + (i == BARRA_SUP ? partes[i].comprimento * t : 0);
-                    float pontoY = parteY + (i != BARRA_SUP ? partes[i].comprimento * t : 0);
-                    float pontoZ = parteZ;
-                    
-                    if (CheckCollision(pontoX, pontoY, pontoZ, espessura,
-                                      pos_ballX, pos_ballY, pos_ballZ, ballRadius)) {
-                        // Rebate a bola
-                        pushDirX *= -0.8f;
-                        pushDirZ *= -0.8f;
-                        ballSpeed *= 0.7f;
-                        break;
-                    }
-                }
-            }
-        glPopMatrix();
-    }
+    glPushMatrix();
+        // Poste direito
+        glTranslatef(largura / 2, traveY, traveZ);
+        glRotatef(-90, 1, 0, 0);
+        gluCylinder(trave, espessura, espessura, altura, 20, 20);
+    glPopMatrix();
+
+    glPushMatrix();
+        // Barra transversal
+        glTranslatef(-largura / 2, altura + traveY, traveZ);
+        glRotatef(90, 0, 1, 0);
+        gluCylinder(trave, espessura, espessura, largura, 20, 20);
+    glPopMatrix();
 
     gluDeleteQuadric(trave);
 }
@@ -634,7 +593,6 @@ void keyboard(unsigned char key, int x, int y) {
             if (pos_ballX == 0.0f && pos_ballZ == -3.0f) {
                 espacoPressionado = true;
                 mostrarSeta = true;
-                tempoPressionado = 0.0f;
             }
             break;
         case 27:
@@ -658,12 +616,14 @@ void keyboardUp(unsigned char key, int x, int y) {
                 pushDirX = dirX;
                 pushDirY = dirY;
                 pushDirZ = dirZ;
+                Vector3f direcao = ObterDirecaoSeta();
                 
                 // Potência proporcional ao tempo pressionado
                 float potencia = fmin(1.0f, tempoPressionado/TEMPO_MAX_CHUTE);
                 ballSpeed = kick * (0.5f + potencia*0.5f); // 50-100%
-                force = 0.4f * (1.0f + potencia);
+                if(direcao.y > 0) force = 0.1f * (1.0f + potencia);
                 ballHit = true;
+                tempoPressionado = 0.0f;
             }
             break;
     }
@@ -680,13 +640,12 @@ void display(){
               0.0f, 1.0f, 0.0f);
 
     Chao();
-    //Grid();
     Sky(50.0f);
     DesenharSeta();
     Ball();
     Goleiro();
     PlayerPos();
-    OnGolMarcado();
+    Goal();
 
     glPushMatrix();
         glDisable(GL_LIGHTING);  // Desativa a iluminação para a esfera da luz
@@ -716,10 +675,9 @@ void reshape(int w, int h) {
 }
 
 void update(int value) {
-    //BallRot();
+
     BallPos();
-    AtualizarGoleiro();
-    glutPostRedisplay();
+    AtualizarGoleiro(); 
     if(espacoPressionado){
         tempoPressionado += 0.016f; // ~60fps
         if (tempoPressionado >= TEMPO_MAX_CHUTE) {
@@ -732,6 +690,8 @@ void update(int value) {
             setaCor = Vector3f(1.0f, 1.0f - progresso, 0.0f);
         }
     }
+
+    glutPostRedisplay();
     glutTimerFunc(16, update, 0); // Atualiza a cada ~16ms (aproximadamente 60 FPS)
 }
 
